@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ruleta de Loot  </title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="container">
+    <h1> Ruleta de Loot de Bulem!</h1>
+    <p class="muted"></p>
+  </header>
+
+  <main class="container grid">
+    <!-- Panel configuración -->
+    <section class="card">
+      <h2>Configuración</h2>
+
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="optUniquePrize" checked>
+          Un participante solo puede ganar 1 vez (queda eliminado)
+        </label>
+      </div>
+
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="optNoRepeatPrize">
+          No repetir loot (solo si hay stock > 0, pero evitar repeticiones si se puede)
+        </label>
+      </div>
+
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="optWeighted" checked>
+          Sorteo ponderado por stock (más stock = más chances)
+        </label>
+      </div>
+
+      <div class="row">
+        <label>Duración giro (ms)</label>
+        <input type="number" id="spinMs" value="4200" min="800" step="100">
+      </div>
+
+      <div class="row">
+        <label>Giros extra</label>
+        <input type="number" id="extraTurns" value="6" min="2" step="1">
+      </div>
+
+      <div class="row">
+        <button id="btnReset" class="danger">Resetear todo</button>
+        <button id="btnExport" class="secondary">Exportar JSON</button>
+        <button id="btnImport" class="secondary">Importar JSON</button>
+        <input type="file" id="importFile" accept="application/json" hidden />
+      </div>
+    </section>
+
+    <!-- Panel cargas -->
+    <section class="card">
+      <h2>Cargar datos</h2>
+
+      <h3>Loot</h3>
+      <div class="inline">
+        <input id="prizeName" placeholder="Ej: Enchant Weapon" />
+        <input id="prizeQty" type="number" value="1" min="1" />
+        <button id="btnAddPrize">Agregar</button>
+      </div>
+      <div id="prizeList" class="list"></div>
+
+      <h3>Players</h3>
+      <div class="inline">
+        <input id="participantName" placeholder="Ej: LaPuchu" />
+        <button id="btnAddParticipant">Agregar</button>
+      </div>
+      <button id="btnClearHistory" class="secondary">Borrar historial</button>
+
+      <div class="inline">
+        <textarea id="bulkParticipants" placeholder="Pegá varios, uno por línea"></textarea>
+        <button id="btnAddBulk">Cargar lista</button>
+      </div>
+      <div id="participantList" class="list"></div>
+    </section>
+
+    <!-- Ruleta -->
+    <section class="card wide">
+      <h2>Ruleta</h2>
+
+      <div class="wheelWrap">
+        <canvas id="wheel" width="520" height="520"></canvas>
+        <div class="pointer" aria-hidden="true"></div>
+      </div>
+
+      <div class="row">
+        <label>Participante actual</label>
+        <select id="participantSelect"></select>
+      </div>
+
+      <div class="row">
+        <button id="btnSpin" class="primary">GIRAR 🎡</button>
+        <button id="btnSkip" class="secondary">Saltar participante</button>
+      </div>
+
+      <div class="card small">
+        <h3>Resultado</h3>
+        <div id="result" class="result muted">Aún no giraste.</div>
+      </div>
+
+      <div class="card small">
+        <h3>Historial</h3>
+        <div id="history" class="history"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="container muted">
+    Hecho por Bulem con amor♥.
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
