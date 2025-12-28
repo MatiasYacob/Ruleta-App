@@ -150,4 +150,40 @@
     .grid{ grid-template-columns: 1fr; }
     canvas{ width: 360px; height: 360px; }
   }
+  /* Accordion (details/summary) */
+.accordion{
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,.06);
+    background: rgba(255,255,255,.03);
+    padding: 10px 12px;
+  }
+  
+  .accordionSummary{
+    
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    cursor:pointer;
+    user-select:none;
+    list-style:none;
+    
+  }
+  
+  .accordionSummary::-webkit-details-marker{
+    display:none;
+  }
+  
+  .accordionSummary::before{
+    content:"▸";
+    margin-right: 10px;
+    opacity:.85;
+  }
+  
+  .accordion[open] .accordionSummary::before{
+    content:"▾";
+  }
+  
+  .accordionBody{
+    padding-top: 10px;
+  }
   

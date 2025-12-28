@@ -1,7 +1,10 @@
-// Ruleta local para GitHub Pages (sin servidor). Guarda estado en localStorage.
+// Ruleta de Loot - 100% Frontend (GitHub Pages compatible)
+// - winners con contador (sin repetir loot)
+// - botón borrar historial
+// - animación ruleta + vuelve a posición inicial
+// - selector de player arreglado (no se queda siempre en el primero)
 
-const LS_KEY = "ruleta_premios_v1";
-
+const LS_KEY = "ruleta_loot_v2";
 const $ = (id) => document.getElementById(id);
 
 const state = {
@@ -15,9 +18,10 @@ const state = {
     spinMs: 4200,
     extraTurns: 6
   },
-  lastPrizeId: null,
+  lastPrizeId: null
 };
 
+/* ---------------- Storage ---------------- */
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
@@ -27,17 +31,18 @@ function save() {
 }
 
 function normalizeLoadedState(parsed) {
-  // Compat: si antes wins era array, convertir a objeto contador
+  // Compatibilidad por si venías de versiones viejas:
+  // - wins array -> objeto contador
   if (Array.isArray(parsed?.participants)) {
     parsed.participants = parsed.participants.map(p => {
       if (!p) return p;
 
-      // wins nuevo: objeto
+      // wins ya es objeto contador
       if (p.wins && typeof p.wins === "object" && !Array.isArray(p.wins)) {
         return { ...p, wins: p.wins };
       }
 
-      // wins viejo: array de strings
+      // wins era array ["A","A","B"] -> {A:2,B:1}
       if (Array.isArray(p.wins)) {
         const map = {};
         for (const name of p.wins) {
@@ -47,10 +52,18 @@ function normalizeLoadedState(parsed) {
         return { ...p, wins: map };
       }
 
-      // si no hay wins
       return { ...p, wins: {} };
     });
   }
+
+  // Ensure options
+  parsed.options = parsed.options || {};
+  parsed.options.uniqueWinner ??= true;
+  parsed.options.noRepeatPrize ??= false;
+  parsed.options.weightedByStock ??= true;
+  parsed.options.spinMs ??= 4200;
+  parsed.options.extraTurns ??= 6;
+
   return parsed;
 }
 
@@ -60,47 +73,51 @@ function load() {
   try {
     const parsed = normalizeLoadedState(JSON.parse(raw));
     Object.assign(state, parsed);
-  } catch {}
+  } catch (e) {
+    console.warn("No se pudo cargar localStorage:", e);
+  }
 }
 
 function resetAll() {
   localStorage.removeItem(LS_KEY);
   location.reload();
 }
-function clearHistoryAndWins() {
-   
-  
-    // Limpia ganados por jugador (para nueva instancia completa)
-    state.participants = state.participants.map(p => ({
-      ...p,
-      wins: {}
-    }));
-  
-    save();
-    renderAll();
-    setResult("Historial borrado. Nueva instancia lista.", false);
-  }
-  
-// ---------- Helpers ----------
-function escapeHtml(s){
-  return String(s).replace(/[&<>"']/g, (c)=>({
-    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+
+/* ---------------- Helpers ---------------- */
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   }[c]));
 }
 
-function formatWins(winsObj){
+function formatWins(winsObj) {
   if (!winsObj || typeof winsObj !== "object") return "—";
-  const entries = Object.entries(winsObj).filter(([,v]) => Number(v) > 0);
+  const entries = Object.entries(winsObj).filter(([, v]) => Number(v) > 0);
   if (entries.length === 0) return "—";
-  // ordena por cantidad desc, luego nombre
-  entries.sort((a,b) => (b[1]-a[1]) || a[0].localeCompare(b[0]));
-  return entries.map(([name,count]) => `${name} x${count}`).join(", ");
+  entries.sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
+  return entries.map(([name, count]) => `${name} x${count}`).join(", ");
 }
 
-// ---------- UI Render ----------
+function setResult(text, warn = false) {
+  const el = $("result");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("muted", !warn);
+}
+
+/* ---------------- UI Render ---------------- */
+function renderOptions() {
+  $("optUniquePrize").checked = !!state.options.uniqueWinner;
+  $("optNoRepeatPrize").checked = !!state.options.noRepeatPrize;
+  $("optWeighted").checked = !!state.options.weightedByStock;
+  $("spinMs").value = state.options.spinMs;
+  $("extraTurns").value = state.options.extraTurns;
+}
+
 function renderPrizes() {
   const el = $("prizeList");
   el.innerHTML = "";
+
   state.prizes.forEach(p => {
     const div = document.createElement("div");
     div.className = "item";
@@ -133,6 +150,7 @@ function renderPrizes() {
         prize.qty += 1;
         prize.remaining += 1;
       }
+
       save();
       renderAll();
     });
@@ -142,6 +160,7 @@ function renderPrizes() {
 function renderParticipants() {
   const el = $("participantList");
   el.innerHTML = "";
+
   state.participants.forEach(p => {
     const winsText = formatWins(p.wins);
 
@@ -172,15 +191,19 @@ function renderParticipants() {
       } else if (act === "toggle") {
         person.active = !person.active;
       }
+
       save();
       renderAll();
     });
   });
 
-  // Select
+  // --- SELECT (FIX) ---
   const sel = $("participantSelect");
+  const prevSelected = sel.value; // preservar selección previa
   sel.innerHTML = "";
+
   const actives = state.participants.filter(p => p.active);
+
   if (actives.length === 0) {
     const opt = document.createElement("option");
     opt.value = "";
@@ -189,23 +212,33 @@ function renderParticipants() {
     sel.disabled = true;
   } else {
     sel.disabled = false;
+
     actives.forEach(p => {
       const opt = document.createElement("option");
       opt.value = p.id;
       opt.textContent = p.name;
       sel.appendChild(opt);
     });
+
+    const stillExists = actives.some(p => p.id === prevSelected);
+    sel.value = stillExists ? prevSelected : actives[0].id;
   }
+
+  // contador en el acordeón
+  const countEl = document.getElementById("playersCount");
+  if (countEl) countEl.textContent = `(${state.participants.length})`;
 }
 
 function renderHistory() {
   const el = $("history");
   el.innerHTML = "";
-  const items = [...state.history].slice(-50).reverse();
+
+  const items = [...state.history].slice(-80).reverse();
   if (items.length === 0) {
     el.innerHTML = `<div class="muted">Aún no hay resultados.</div>`;
     return;
   }
+
   items.forEach(h => {
     const div = document.createElement("div");
     div.className = "badge";
@@ -213,14 +246,6 @@ function renderHistory() {
     div.innerHTML = `<span class="ok">✔</span> <strong>${escapeHtml(h.participantName)}</strong> → ${escapeHtml(h.prizeName)} <span class="meta">(${date})</span>`;
     el.appendChild(div);
   });
-}
-
-function renderOptions() {
-  $("optUniquePrize").checked = !!state.options.uniqueWinner;
-  $("optNoRepeatPrize").checked = !!state.options.noRepeatPrize;
-  $("optWeighted").checked = !!state.options.weightedByStock;
-  $("spinMs").value = state.options.spinMs;
-  $("extraTurns").value = state.options.extraTurns;
 }
 
 function renderAll() {
@@ -231,7 +256,7 @@ function renderAll() {
   drawWheel();
 }
 
-// ---------- Wheel drawing + animation ----------
+/* ---------------- Wheel (Canvas) ---------------- */
 const canvas = $("wheel");
 const ctx = canvas.getContext("2d");
 let wheelAngle = 0;
@@ -244,13 +269,14 @@ function availablePrizes() {
 function drawWheel() {
   const prizes = availablePrizes();
   const W = canvas.width, H = canvas.height;
-  const cx = W/2, cy = H/2;
-  const r = Math.min(W,H)/2 - 10;
+  const cx = W / 2, cy = H / 2;
+  const r = Math.min(W, H) / 2 - 10;
 
-  ctx.clearRect(0,0,W,H);
+  ctx.clearRect(0, 0, W, H);
 
+  // base ring
   ctx.beginPath();
-  ctx.arc(cx, cy, r+2, 0, Math.PI*2);
+  ctx.arc(cx, cy, r + 2, 0, Math.PI * 2);
   ctx.fillStyle = "rgba(255,255,255,.06)";
   ctx.fill();
 
@@ -267,38 +293,40 @@ function drawWheel() {
   }
 
   const totalSlices = prizes.length;
-  const slice = (Math.PI*2) / totalSlices;
+  const slice = (Math.PI * 2) / totalSlices;
 
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(wheelAngle);
 
-  for (let i=0; i<totalSlices; i++) {
-    const a0 = i*slice;
+  for (let i = 0; i < totalSlices; i++) {
+    const a0 = i * slice;
     const a1 = a0 + slice;
 
     const isEven = i % 2 === 0;
     ctx.fillStyle = isEven ? "rgba(106,163,255,.35)" : "rgba(255,255,255,.12)";
 
     ctx.beginPath();
-    ctx.moveTo(0,0);
-    ctx.arc(0,0,r,a0,a1);
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, r, a0, a1);
     ctx.closePath();
     ctx.fill();
 
+    // texto
     ctx.save();
-    const mid = (a0+a1)/2;
+    const mid = (a0 + a1) / 2;
     ctx.rotate(mid);
     ctx.textAlign = "right";
     ctx.fillStyle = "rgba(255,255,255,.92)";
     ctx.font = "16px system-ui";
     const label = `${prizes[i].name} (${prizes[i].remaining})`;
-    ctx.fillText(label, r-12, 6);
+    ctx.fillText(label, r - 12, 6);
     ctx.restore();
   }
 
+  // centro
   ctx.beginPath();
-  ctx.arc(0,0,70,0,Math.PI*2);
+  ctx.arc(0, 0, 70, 0, Math.PI * 2);
   ctx.fillStyle = "rgba(0,0,0,.18)";
   ctx.fill();
   ctx.fillStyle = "rgba(255,255,255,.9)";
@@ -312,6 +340,7 @@ function drawWheel() {
 function pickPrizeIndex(prizes) {
   if (prizes.length === 1) return 0;
 
+  // evitar repetir consecutivo si se puede
   const candidates = state.options.noRepeatPrize && state.lastPrizeId
     ? prizes.filter(p => p.id !== state.lastPrizeId)
     : prizes;
@@ -320,9 +349,10 @@ function pickPrizeIndex(prizes) {
 
   if (state.options.weightedByStock) {
     const weights = pool.map(p => Math.max(1, p.remaining));
-    const sum = weights.reduce((a,b)=>a+b,0);
+    const sum = weights.reduce((a, b) => a + b, 0);
     let roll = Math.random() * sum;
-    for (let i=0; i<pool.length; i++) {
+
+    for (let i = 0; i < pool.length; i++) {
       roll -= weights[i];
       if (roll <= 0) return prizes.findIndex(p => p.id === pool[i].id);
     }
@@ -332,15 +362,23 @@ function pickPrizeIndex(prizes) {
 }
 
 function angleForIndex(index, total) {
-  const slice = (Math.PI*2)/total;
-  return -(index * slice + slice/2);
+  const slice = (Math.PI * 2) / total;
+  // centro del slice arriba del puntero
+  return -(index * slice + slice / 2);
 }
 
-function easeOutCubic(t){ return 1 - Math.pow(1-t, 3); }
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 function easeInOutCubic(t) {
-  return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
+function normalizeAngleForward(a) {
+  const two = Math.PI * 2;
+  while (a < 0) a += two;
+  return a;
+}
+
+// Animación para volver a 0 por el camino más corto (sin empujar vueltas raras)
 function animateWheelTo(targetAngle, duration = 450) {
   const startAngle = wheelAngle;
   let delta = targetAngle - startAngle;
@@ -363,6 +401,7 @@ function animateWheelTo(targetAngle, duration = 450) {
 
 async function spin() {
   if (spinning) return;
+
   const prizes = availablePrizes();
   if (prizes.length === 0) {
     setResult("No hay loot con stock disponible.", true);
@@ -371,6 +410,7 @@ async function spin() {
 
   const participantId = $("participantSelect").value;
   const participant = state.participants.find(p => p.id === participantId);
+
   if (!participant || !participant.active) {
     setResult("Seleccioná un player activo.", true);
     return;
@@ -388,18 +428,19 @@ async function spin() {
 
   const duration = Math.max(800, Number(state.options.spinMs) || 4200);
   const startAngle = wheelAngle;
-  const delta = normalizeAngle(finalAngle - startAngle);
+  const delta = normalizeAngleForward(finalAngle - startAngle);
 
   const start = performance.now();
   await new Promise(resolve => {
     const frame = (now) => {
-      const t = Math.min(1, (now - start)/duration);
+      const t = Math.min(1, (now - start) / duration);
       const e = easeOutCubic(t);
       wheelAngle = startAngle + delta * e;
       drawWheel();
 
+      // micro “shake” final
       if (t > 0.92) {
-        wheelAngle += Math.sin(now/20) * (1-t) * 0.06;
+        wheelAngle += Math.sin(now / 20) * (1 - t) * 0.06;
       }
 
       if (t < 1) requestAnimationFrame(frame);
@@ -413,18 +454,20 @@ async function spin() {
   prize.remaining = Math.max(0, prize.remaining - 1);
   state.lastPrizeId = prize.id;
 
-  // contador por loot
-  participant.wins = participant.wins && typeof participant.wins === "object" && !Array.isArray(participant.wins)
+  // contador de loot por player
+  participant.wins = (participant.wins && typeof participant.wins === "object" && !Array.isArray(participant.wins))
     ? participant.wins
     : {};
   participant.wins[prize.name] = (participant.wins[prize.name] || 0) + 1;
 
+  // historial global
   state.history.push({
     ts: Date.now(),
     participantName: participant.name,
     prizeName: prize.name
   });
 
+  // regla: un player solo gana una vez
   if (state.options.uniqueWinner) {
     participant.active = false;
   }
@@ -433,6 +476,7 @@ async function spin() {
   setResult(`🎉 ${participant.name} ganó: ${prize.name}`, false);
   renderAll();
 
+  // volver a posición inicial
   await animateWheelTo(0, 500);
   drawWheel();
 
@@ -440,19 +484,7 @@ async function spin() {
   spinning = false;
 }
 
-function normalizeAngle(a) {
-  const two = Math.PI*2;
-  while (a < 0) a += two;
-  return a;
-}
-
-function setResult(text, warn=false) {
-  const el = $("result");
-  el.textContent = text;
-  el.classList.toggle("muted", !warn);
-}
-
-// ---------- Actions ----------
+/* ---------------- Actions ---------------- */
 function addPrize(name, qty) {
   name = (name || "").trim();
   qty = Number(qty);
@@ -465,6 +497,7 @@ function addPrize(name, qty) {
   } else {
     state.prizes.push({ id: uid(), name, qty, remaining: qty });
   }
+
   save();
   renderAll();
 }
@@ -476,24 +509,47 @@ function addParticipant(name) {
   const existing = state.participants.find(p => p.name.toLowerCase() === name.toLowerCase());
   if (existing) return;
 
-  state.participants.push({ id: uid(), name, active: true, wins: {} });
+  const newId = uid();
+  state.participants.push({ id: newId, name, active: true, wins: {} });
+
   save();
   renderAll();
+
+  // seleccionar automáticamente el recién agregado
+  const sel = $("participantSelect");
+  if (sel && !sel.disabled) sel.value = newId;
+}
+
+function addParticipantsBulk(text) {
+  const lines = (text || "")
+    .split("\n")
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  let added = 0;
+  for (const line of lines) {
+    const before = state.participants.length;
+    addParticipant(line);
+    if (state.participants.length > before) added++;
+  }
+  return added;
 }
 
 function skipParticipant() {
   const sel = $("participantSelect");
   if (sel.disabled) return;
+
   const opts = [...sel.options];
   if (opts.length <= 1) return;
+
   sel.selectedIndex = (sel.selectedIndex + 1) % opts.length;
 }
 
 function exportJSON() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], {type:"application/json"});
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "ruleta-data.json";
+  a.download = "ruleta-loot-data.json";
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -501,30 +557,38 @@ function exportJSON() {
 function importJSON(file) {
   const reader = new FileReader();
   reader.onload = () => {
-    try{
+    try {
       const parsedRaw = JSON.parse(reader.result);
       const parsed = normalizeLoadedState(parsedRaw);
       if (!parsed || typeof parsed !== "object") throw new Error("Formato inválido");
+
       Object.assign(state, parsed);
       save();
       renderAll();
       setResult("Importado correctamente.", false);
-    }catch{
+    } catch {
       setResult("No se pudo importar el JSON.", true);
     }
   };
   reader.readAsText(file);
 }
 
-// ---------- Init ----------
-load();
+// Borra historial y wins para nueva instancia.
+// (Si querés reactivar a todos los players, dejá active:true)
+function clearHistoryAndWins() {
+  state.history = [];
+  state.participants = state.participants.map(p => ({
+    ...p,
+    active: true,
+    wins: {}
+  }));
+  save();
+  renderAll();
+  setResult("Historial borrado. Nueva instancia lista.", false);
+}
 
-$("btnClearHistory").addEventListener("click", () => {
-    if (confirm("¿Borrar historial y ganados de los jugadores?")) {
-      clearHistoryAndWins();
-    }
-  });
-  
+/* ---------------- Init ---------------- */
+load();
 
 $("btnAddPrize").addEventListener("click", () => {
   addPrize($("prizeName").value, $("prizeQty").value);
@@ -538,41 +602,54 @@ $("btnAddParticipant").addEventListener("click", () => {
 });
 
 $("btnAddBulk").addEventListener("click", () => {
-  const lines = $("bulkParticipants").value.split("\n").map(x=>x.trim()).filter(Boolean);
-  lines.forEach(addParticipant);
+  const added = addParticipantsBulk($("bulkParticipants").value);
   $("bulkParticipants").value = "";
+  if (added > 0) setResult(`Cargados ${added} players.`, false);
 });
 
 $("btnSpin").addEventListener("click", spin);
 $("btnSkip").addEventListener("click", skipParticipant);
 
 $("optUniquePrize").addEventListener("change", (e) => {
-  state.options.uniqueWinner = e.target.checked; save();
+  state.options.uniqueWinner = e.target.checked;
+  save();
 });
 $("optNoRepeatPrize").addEventListener("change", (e) => {
-  state.options.noRepeatPrize = e.target.checked; save();
+  state.options.noRepeatPrize = e.target.checked;
+  save();
 });
 $("optWeighted").addEventListener("change", (e) => {
-  state.options.weightedByStock = e.target.checked; save();
+  state.options.weightedByStock = e.target.checked;
+  save();
 });
 $("spinMs").addEventListener("change", (e) => {
-  state.options.spinMs = Number(e.target.value)||4200; save();
+  state.options.spinMs = Math.max(800, Number(e.target.value) || 4200);
+  save();
 });
 $("extraTurns").addEventListener("change", (e) => {
-  state.options.extraTurns = Number(e.target.value)||6; save();
+  state.options.extraTurns = Math.max(2, Number(e.target.value) || 6);
+  save();
 });
 
 $("btnReset").addEventListener("click", () => {
-  if (confirm("¿Seguro? Se borra todo lo guardado en este navegador.")) resetAll();
+  if (confirm("¿Seguro? Se borra TODO (loot, players, historial) de este navegador.")) resetAll();
+});
+
+$("btnClearHistory").addEventListener("click", () => {
+  if (confirm("¿Borrar historial y ganados de players? (deja loot cargado)")) {
+    clearHistoryAndWins();
+  }
 });
 
 $("btnExport").addEventListener("click", exportJSON);
 $("btnImport").addEventListener("click", () => $("importFile").click());
+
 $("importFile").addEventListener("change", (e) => {
   const f = e.target.files?.[0];
   if (f) importJSON(f);
   e.target.value = "";
 });
 
+// Primer render
 renderAll();
 drawWheel();
